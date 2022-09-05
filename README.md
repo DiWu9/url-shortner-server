@@ -1,2 +1,2 @@
-# url-shortner-server
-The backend for url shortner service.
+# URL Shortner Service (server)
+The server-side for url shortner service.
