@@ -14,9 +14,7 @@ public class LoadDatabase {
     @Bean
     CommandLineRunner initDatabase(UrlMapRepository repository) {
         return args -> {
-            log.info("Preloading " +
-                    repository.save(new UrlMap("https://docs.spring.io/spring-data/jpa/docs/current/reference/html/#query-by-example",
-                    "05ycRTd7Pyh")));
+            log.info("Initializing Database...");
         };
     }
 }

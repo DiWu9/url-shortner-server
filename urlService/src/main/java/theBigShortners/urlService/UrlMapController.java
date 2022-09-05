@@ -1,29 +1,44 @@
 package theBigShortners.urlService;
+import static com.google.cloud.bigtable.data.v2.models.Filters.FILTERS;
+import com.google.cloud.bigtable.data.v2.models.Filters;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.ModelAndView;
-import org.springframework.web.servlet.view.RedirectView;
+import com.google.cloud.bigtable.data.v2.BigtableDataClient;
+import com.google.cloud.bigtable.data.v2.models.Row;
+import com.google.cloud.bigtable.data.v2.models.RowMutation;
 
-import javax.servlet.ServletOutputStream;
-import javax.servlet.http.Cookie;
-import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.net.URI;
 import java.util.*;
 
 @RestController
-@CrossOrigin(origins="http://localhost:3000")
+@CrossOrigin(origins="*")
 public class UrlMapController {
 
+    private static final Logger log = LoggerFactory.getLogger(UrlMapController.class);
     private final UrlMapRepository repository;
     private final HashMap<String, UrlMap> fakeDB = new HashMap<>();
+    private final String projectId = "rice-comp-539-fall-2021";
+    private final String instanceId = "comp-539-fall-2021";
+    private final String tableId = "tbs_url";
+    private BigtableDataClient dataClient;
 
+    // constructor
     UrlMapController(UrlMapRepository repo) {
+        this.dataClient = null;
+        try {
+            this.dataClient = BigtableDataClient.create(projectId, instanceId);
+        } catch (IOException e) {
+            System.out.println(
+                    "Unable to initialize service client, as a network error occurred: \n" + e.toString());
+        }
         this.repository = repo;
     }
+
     // @PostMapping("/url/short", headers = {"content-type=application/x-www-form-urlencoded"})
     /**
      * Generate a key for longUrl, create UrlMap, store them in HashMap
@@ -33,37 +48,41 @@ public class UrlMapController {
     @PostMapping("/url/short")
     UrlMap shortenUrl(@RequestBody String longUrl) {
         String key = Util.keyGen(11);
+        try {
+            long timestamp = System.currentTimeMillis() * 1000;
+            RowMutation rowMutation = RowMutation.create(tableId, key)
+                    .setCell(
+                            "url_mapping",
+                            "long_cell",
+                            timestamp,
+                            longUrl);
+            this.dataClient.mutateRow(rowMutation);
+            log.info("Successfully wrote row %s", key);
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
         UrlMap map = new UrlMap(longUrl, key);
-        fakeDB.put(key, map);
+        //fakeDB.put(key, map);
         return map;
-        //return repository.save(map);
     }
-
-    /**
-     * given the key, find the matching long url
-     * @param key 11-bit key, part of the shortened url link
-     * @return the UrlMap that contains everything
-    @GetMapping("/url/resolve")
-    String resolveUrl(@RequestBody String key) {
-        if (fakeDB.containsKey(key)) {
-            Util.browse(fakeDB.get(key).getLongUrl());
-            return "Webpage is opened in web browser.";
-        }
-        else {
-            throw new UrlNotFoundException(0L);
-        }
-    }
-    */
 
     @GetMapping(value = "/url/resolve/{key}")
     ResponseEntity<Void> resolveUrl(@PathVariable String key) {
-        if (fakeDB.containsKey(key)) {
-            String longUrl = fakeDB.get(key).getLongUrl();
-            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(longUrl)).build();
+        String longUrl = "";
+        try {
+            Filters.Filter filter =
+                    FILTERS
+                            .chain()
+                            .filter(FILTERS.family().exactMatch("url_mapping"))
+                            .filter(FILTERS.qualifier().exactMatch("long_cell"));
+            Row row = this.dataClient.readRow(tableId, key, filter);
+            longUrl = row.getCells().get(0).getValue().toStringUtf8();
+            int i = 5;
+        } catch(Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
-        else {
-            throw new UrlNotFoundException(0L);
-        }
+        return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(longUrl)).build();
     }
 
     @GetMapping("/url")
